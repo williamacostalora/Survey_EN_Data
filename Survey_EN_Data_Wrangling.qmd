@@ -9,326 +9,254 @@ library("dplyr")
 ```
 
 
-## Data Analysis
+## Data Cleaning
 ```{r}
-sm_header_function <- function(x, rep_val){
-  
-  orig <- x
-  
-  sv <- x
-  sv <- sv[1,]
-  sv <- sv[, sapply(sv, Negate(anyNA)), drop = FALSE]
-  sv <- t(sv)
-  sv <- cbind(rownames(sv), data.frame(sv, row.names = NULL))
-  names(sv)[1] <- "name"
-  names(sv)[2] <- "value"
-  sv$grp <- with(sv, ave(name, FUN = function(x) cumsum(!startsWith(name, rep_val))))
-  sv$new_value <- with(sv, ave(name, grp, FUN = function(x) head(x, 1)))
-  sv$new_value <- paste0(sv$new_value, " ", sv$value)
-  new_names <- as.character(sv$new_value)
-  colnames(orig)[which(colnames(orig) %in% sv$name)] <- sv$new_value
-  orig <- orig[-c(1),]
-  return(orig)
-}
+# ============================================================================
+# Script: Normalize SurveyMonkey Survey Responses
+# Purpose: Consolidate multiple answer columns into single columns per question
+# ============================================================================
 
-```
-
-
-```{r}
-mod1<- read.csv("CSV/Customer Survey 2025 English Online.csv")
-
-mod2<- read.csv("CSV/Customer Survey 2025 English Online.csv")
-
-sm_header_function <- function(x, rep_val){
-  
-  orig <- x
-  
-  sv <- x
-  sv <- sv[1,]
-  sv <- sv[, sapply(sv, Negate(anyNA)), drop = FALSE]
-  sv <- t(sv)
-  sv <- cbind(rownames(sv), data.frame(sv, row.names = NULL))
-  names(sv)[1] <- "name"
-  names(sv)[2] <- "value"
-  sv$grp <- with(sv, ave(name, FUN = function(x) cumsum(!startsWith(name, rep_val))))
-  sv$new_value <- with(sv, ave(name, grp, FUN = function(x) head(x, 1)))
-  sv$new_value <- paste0(sv$new_value, " ", sv$value)
-  new_names <- as.character(sv$new_value)
-  colnames(orig)[which(colnames(orig) %in% sv$name)] <- sv$new_value
-  orig <- orig[-c(1),]
-  return(orig)
-}
-
-mod3<-sm_header_function(mod2, "X")
-
-
-
-```
-
-```{r}
-# Load the necessary libraries
-library(dplyr)
+library(tidyverse)
+library(readr)
 library(stringr)
-library(janitor)
-library(purrr)
 
-# Assuming your raw data frame is loaded as 'mod3'
+# ============================================================================
+# STEP 1: Read the raw data
+# ============================================================================
 
-# ------------------------------------------------------------------------------
-## 🧹 Step 1: Clean Names and Standardize Prefixes (Simplified for Robustness)
-# ------------------------------------------------------------------------------
+# Read without headers first
+raw_data <- read_csv(
+  "CSV/Customer Survey 2025 English Online.csv",
+  col_names = FALSE,
+  show_col_types = FALSE
+)
 
-mod3_renamed <- mod3 %>%
-  janitor::clean_names() %>%
-  
-  # 1. Appointment Scheduling (app_schedule_)
-  # Simplified pattern for better matching after clean_names()
-  rename_with(~ str_replace(.x, "^in_the_future_how_would_you_like_to_schedule_an_appointment_for_our_services_", "app_schedule_"),
-              .cols = starts_with("in_the_future_how_would_you_like_to_schedule_an_appointment_for_our_services")) %>%
-  
-  # 2. Tax Service Preference (tax_service_rank_)
-  rename_with(~ str_replace(.x, "^in_the_future_how_would_you_like_to_receive_our_tax_services_please_rank_your_choices_", "tax_service_rank_"),
-              .cols = starts_with("in_the_future_how_would_you_like_to_receive_our_tax_services_please_rank_your_choices")) %>%
-  
-  # 3. Tax Info Source (tax_info_source_)
-  rename_with(~ str_replace(.x, "^where_do_you_get_your_information_about_taxes_select_all_that_apply_", "tax_info_source_"),
-              .cols = starts_with("where_do_you_get_your_information_about_taxes_select_all_that_apply")) %>%
-  
-  # 4. Race/Ethnicity (race_) - Pattern confirmed and used.
-  rename_with(~ str_replace(.x, "^how_do_you_identify_select_all_that_apply_or_self_identify_", "race_"),
-              .cols = starts_with("how_do_you_identify_select_all_that_apply_or_self_identify")) %>%
-  
-  # 5. Sexual Identity (sexual_identity_) - Pattern confirmed and used.
-  rename_with(~ str_replace(.x, "^how_do_you_currently_describe_your_sexual_identity_please_select_the_option_that_best_fits_how_you_identify_you_may_skip_this_question_if_you_prefer_not_to_answer_", "sexual_identity_"),
-              .cols = starts_with("how_do_you_currently_describe_your_sexual_identity_please_select_the_option_that_best_fits_how_you_identify")) %>%
-  
-  # 6. Languages Spoken (lang_speak_)
-  rename_with(~ str_replace(.x, "^what_language_s_are_you_most_comfortable_speaking_", "lang_speak_"),
-              .cols = starts_with("what_language_s_are_you_most_comfortable_speaking")) %>%
-  
-  # 7. Disability Status (disability_)
-  rename_with(~ str_replace(.x, "^these_questions_are_meant_to_help_us_understand_disability_status_and_accommodation_needs_in_our_community_please_let_us_know_if_any_of_these_experiences_apply_to_you_", "disability_"),
-              .cols = starts_with("these_questions_are_meant_to_help_us_understand_disability_status_and_accommodation_needs_in_our_community")) %>%
-  
-  # 8. Financial Challenges (fin_challenge_)
-  rename_with(~ str_replace(.x, "^which_of_the_following_financial_challenges_have_you_experienced_in_the_past_12_months_select_all_that_apply_", "fin_challenge_"),
-              .cols = starts_with("which_of_the_following_financial_challenges_have_you_experienced_in_the_past_12_months_select_all_that_apply")) %>%
-  
-  # 9. Financial Goals (goal_)
-  rename_with(~ str_replace(.x, "^which_financial_goals_are_most_important_to_you_currently_select_all_that_apply_", "goal_"),
-              .cols = starts_with("which_financial_goals_are_most_important_to_you_currently_select_all_that_apply")) %>%
-  
-  # 10. CTC Info Needed (ctc_info_)
-  rename_with(~ str_replace(.x, "^what_information_do_you_need_to_make_a_decision_about_enrolling_in_advance_ctc_periodic_payments_check_all_that_apply_", "ctc_info_"),
-              .cols = starts_with("what_information_do_you_need_to_make_a_decision_about_enrolling_in_advance_ctc_periodic_payments")) %>%
-  
-  # 11. CTC Refund Use (ctc_use_)
-  rename_with(~ str_replace(.x, "^how_did_you_use_your_child_tax_credit_refund_select_all_that_apply_", "ctc_use_"),
-              .cols = starts_with("how_did_you_use_your_child_tax_credit_refund_select_all_that_apply")) %>%
-              
-  # 12. Involvement Opportunities (involvement_)
-  rename_with(~ str_replace(.x, "^we_invite_you_to_get_involved_with_prepare_and_prosper_check_the_box_for_the_opportunity_opportunities_you_are_interested_in_", "involvement_"),
-              .cols = starts_with("we_invite_you_to_get_involved_with_prepare_and_prosper_check_the_box_for_the_opportunity_opportunities_you_are_interested_in")) %>%
+cat("Original dimensions:", nrow(raw_data), "rows x", ncol(raw_data), "columns\n")
 
-  # 13. Barriers to Volunteering (volunteer_barrier_)
-  rename_with(~ str_replace(.x, "^if_you_are_not_already_a_volunteer_what_barriers_if_any_prevent_you_from_volunteering_with_prepare_prosper_", "volunteer_barrier_"),
-              .cols = starts_with("if_you_are_not_already_a_volunteer_what_barriers_if_any_prevent_you_from_volunteering_with_prepare_prosper"))
+# ============================================================================
+# STEP 2: Extract questions and answer options
+# ============================================================================
 
+# Row 1: Questions (some columns are empty, meaning they belong to previous question)
+questions <- raw_data[1, ] %>% unlist() %>% as.character()
 
-# ------------------------------------------------------------------------------
-## 🤝 Step 2: Define and Apply Consolidation Function (Robust Fix for NAs/Warnings)
-# ------------------------------------------------------------------------------
+# Row 2: Answer options for each column
+answers <- raw_data[2, ] %>% unlist() %>% as.character()
 
-# This version explicitly handles non-numeric data (like "" or text) and NAs
-# to avoid the "NAs introduced by coercion" warning and the resulting empty strings.
-combine_multiselect_final_v5 <- function(data, prefix) {
-  
-  # 1. Identify the full names of all columns for this prefix group
-  prefix_cols <- names(data)[starts_with(prefix, vars = names(data))]
-  
-  if (length(prefix_cols) == 0) {
-    message(paste("No columns found for prefix:", prefix, ". Skipping."))
-    return(data)
+# Row 3+: Actual response data
+response_data <- raw_data[-c(1, 2), ]
+
+# ============================================================================
+# STEP 3: Identify question groups
+# ============================================================================
+
+# Fill empty question cells with the previous non-empty question
+# This groups columns that belong to the same question
+current_question <- ""
+question_groups <- character(length(questions))
+
+for (i in seq_along(questions)) {
+  if (!is.na(questions[i]) && questions[i] != "") {
+    current_question <- questions[i]
   }
+  question_groups[i] <- current_question
+}
 
-  # 2. Use a concise selection and combination within the mutate call
-  data_combined <- data %>%
-    rowwise() %>%
-    mutate(
-      # Define the new combined column name
-      !!paste0(prefix, "_combined") := {
-        # Select the column values for the current row
-        current_values <- c_across(all_of(prefix_cols))
-        
-        # --- KEY FIX FOR NA WARNINGS ---
-        # 1. Coerce values to numeric, treating NA and non-numeric (like "") as NA.
-        numeric_values <- suppressWarnings(as.numeric(current_values))
-        
-        # 2. Identify the position (index) of the columns where the value is 1
-        is_selected <- !is.na(numeric_values) & numeric_values == 1
-        
-        # 3. Look up the actual column names (answer choices) using the index
-        selected_choices <- prefix_cols[is_selected]
-        
-        # 4. Collapse the selected choices into a single string
-        if(length(selected_choices) == 0) {
-            # If nothing was selected for the row, return an empty string, not NA.
-            "" 
+# Create a mapping dataframe
+column_mapping <- tibble(
+  col_index = 1:length(questions),
+  question = question_groups,
+  answer_option = answers
+) %>%
+  filter(question != "")  # Remove any columns with no question
+
+cat("\nFound", length(unique(column_mapping$question)), "unique questions\n")
+
+# ============================================================================
+# STEP 4: Consolidate columns for each question
+# ============================================================================
+
+# Function to consolidate multiple columns into one
+consolidate_columns <- function(data, indices, answer_labels) {
+  # Get the columns for this question
+  cols <- data[, indices, drop = FALSE]
+  
+  # FIX: Clean NA labels for detection logic
+  answer_labels_clean <- replace_na(answer_labels, "") 
+  
+  # Check if this is an open-ended question
+  is_open_ended <- any(str_detect(answer_labels_clean, "(?i)open.?ended|please specify|optional|self.?describe|self.?identify"))
+  
+  # For each row, find which column has a value and return that answer option
+  result <- apply(cols, 1, function(row) {
+    # Find non-empty values
+    non_empty <- which(!is.na(row) & row != "")
+    
+    if (length(non_empty) == 0) {
+      return(NA_character_)
+    } else if (is_open_ended) {
+      # For open-ended questions, return the actual text value(s)
+      text_values <- row[non_empty]
+      # Remove any that are just "X" or checkmarks
+      text_values <- text_values[!text_values %in% c("X", "x", "✓", "✔")]
+      if (length(text_values) == 0) {
+        return(NA_character_)
+      }
+      return(paste(text_values, collapse = "; "))
+    } else if (length(non_empty) == 1) {
+      # Single answer - check if it's actual text or just a checkmark
+      value <- row[non_empty]
+      if (value %in% c("X", "x", "✓", "✔") || is.na(value)) {
+        # It's a checkmark, return the answer option label
+        return(answer_labels[non_empty])
+      } else {
+        # It's actual text, return it
+        return(value)
+      }
+    } else {
+      # Multiple answers (e.g., "select all that apply")
+      selected_labels <- c()
+      selected_text <- c()
+      
+      for (i in non_empty) {
+        value <- row[i]
+        if (value %in% c("X", "x", "✓", "✔")) {
+          # It's a checkmark
+          selected_labels <- c(selected_labels, answer_labels[i])
         } else {
-            paste(selected_choices, collapse = "; ")
+          # It's text
+          selected_text <- c(selected_text, value)
         }
       }
-    ) %>%
-    ungroup() %>%
-    # Remove the original, individual-answer columns, preserving all other columns
-    select(-all_of(prefix_cols))
+      
+      # Combine both
+      all_values <- c(selected_labels, selected_text)
+      return(paste(all_values, collapse = "; "))
+    }
+  })
   
-  return(data_combined)
+  return(result)
 }
 
+# Create normalized dataset
+normalized_data <- tibble()
+open_ended_count <- 0
 
-# ------------------------------------------------------------------------------
-## 🚀 Step 3: Full Consolidation Pipeline Execution
-# ------------------------------------------------------------------------------
+# Process each unique question
+unique_questions <- unique(column_mapping$question)
 
-# Apply the consolidation function sequentially to all multi-select blocks
-mod3_final <- mod3_renamed %>%
-  combine_multiselect_final_v5("app_schedule") %>%
-  combine_multiselect_final_v5("tax_service_rank") %>%
-  combine_multiselect_final_v5("tax_info_source") %>%
-  combine_multiselect_final_v5("race") %>%
-  combine_multiselect_final_v5("sexual_identity") %>%
-  combine_multiselect_final_v5("lang_speak") %>%
-  combine_multiselect_final_v5("disability") %>%
-  combine_multiselect_final_v5("fin_challenge") %>%
-  combine_multiselect_final_v5("goal") %>%
-  combine_multiselect_final_v5("ctc_info") %>%
-  combine_multiselect_final_v5("ctc_use") %>%
-  combine_multiselect_final_v5("involvement") %>%
-  combine_multiselect_final_v5("volunteer_barrier")
+cat("\nProcessing questions...\n")
 
+for (q in unique_questions) {
+  # Get all columns for this question
+  q_mapping <- column_mapping %>% filter(question == q)
+  
+  # Extract indices and answer labels
+  indices <- q_mapping$col_index
+  answer_labels <- q_mapping$answer_option
+  
+  # FIX: Clean NA labels for detection logic
+  answer_labels_clean <- replace_na(answer_labels, "") 
+  
+  # Check if open-ended (THIS IS WHERE THE ORIGINAL ERROR OCCURRED)
+  if (any(str_detect(answer_labels_clean, "(?i)open.?ended|please specify|optional|self.?describe|self.?identify"))) {
+    open_ended_count <- open_ended_count + 1
+  }
+  
+  # Consolidate into single column
+  # Use the original answer_labels for selection logic, but the cleaned version for detection
+  consolidated <- consolidate_columns(response_data, indices, answer_labels) 
+  
+  # Add to normalized dataset
+  if (ncol(normalized_data) == 0) {
+    normalized_data <- tibble(!!q := consolidated)
+  } else {
+    normalized_data[[q]] <- consolidated
+  }
+  
+  if (match(q, unique_questions) %% 10 == 0) {
+    cat("  Processed", match(q, unique_questions), "of", length(unique_questions), "questions\n")
+  }
+}
 
-# ------------------------------------------------------------------------------
-## ✅ Verification and Final Data Check
-# ------------------------------------------------------------------------------
-cat("\n--- Sample of Consolidated Race Data (Should contain choices now) ---\n")
-mod3_final$race_combined %>% head(10) %>% print()
+cat("\nFound", open_ended_count, "open-ended questions\n")
+cat("Normalized dimensions:", nrow(normalized_data), "rows x", ncol(normalized_data), "columns\n")
 
-cat("\n--- Final Column Count Check ---\n")
-print(length(names(mod3_final)))
-```
-```{r}
-colnames(mod3_final)
-```
+# ============================================================================
+# STEP 5: Clean up column names
+# ============================================================================
 
-```{r}
-mod3_final$race_combined
-```
-```{r}
-colnames(mod3)
-```
-```{r}
-library(dplyr)
-library(stringr)
+# Shorten very long question names and make them valid R names
+clean_colnames <- colnames(normalized_data) %>%
+  str_trunc(100, ellipsis = "...") %>%  # Limit length
+  make.names() %>%  # Make valid R names
+  make.unique()  # Ensure uniqueness
 
-# Assuming your raw data frame is named 'mod3'
-mod3_working <- mod3 
+colnames(normalized_data) <- clean_colnames
 
-# ------------------------------------------------------------------------------
-## 🤝 Step 1: Define Column Lists (Using original names)
-# ------------------------------------------------------------------------------
+# ============================================================================
+# STEP 6: Save the normalized data
+# ============================================================================
 
-race_cols <- c(
-    "How.do.you.identify...select.all.that.apply.or.self.identify. American Indian or Alaska Native",
-    "How.do.you.identify...select.all.that.apply.or.self.identify. African",
-    "How.do.you.identify...select.all.that.apply.or.self.identify. Black or African American",
-    "How.do.you.identify...select.all.that.apply.or.self.identify. Asian or Asian American",
-    "How.do.you.identify...select.all.that.apply.or.self.identify. Native Hawaiian or Other Pacific Islander",
-    "How.do.you.identify...select.all.that.apply.or.self.identify. White or European Descent",
-    "How.do.you.identify...select.all.that.apply.or.self.identify. Middle Eastern or North African",
-    "How.do.you.identify...select.all.that.apply.or.self.identify. Hispanic or Latino/e",
-    "How.do.you.identify...select.all.that.apply.or.self.identify. Prefer not to answer",
-    "How.do.you.identify...select.all.that.apply.or.self.identify. Another race"
+# Save as CSV
+write_csv(
+  normalized_data,
+  "Output/normalized_survey_responses.csv"
 )
 
-sex_id_cols <- c(
-    "How.do.you.currently.describe.your.sexual.identity.Please.select.the.option.that.best.fits.how.you.identify..You.may.skip.this.question.if.you.prefer.not.to.answer. Straight/Heterosexual",
-    "How.do.you.currently.describe.your.sexual.identity.Please.select.the.option.that.best.fits.how.you.identify..You.may.skip.this.question.if.you.prefer.not.to.answer. Gay/Lesbian",
-    "How.do.you.currently.describe.your.sexual.identity.Please.select.the.option.that.best.fits.how.you.identify..You.may.skip.this.question.if.you.prefer.not.to.answer. Bisexual",
-    "How.do.you.currently.describe.your.sexual.identity.Please.select.the.option.that.best.fits.how.you.identify..You.may.skip.this.question.if.you.prefer.not.to.answer. Pansexual",
-    "How.do.you.currently.describe.your.sexual.identity.Please.select.the.option.that.best.fits.how.you.identify..You.may.skip.this.question.if.you.prefer.not.to.answer. Queer",
-    "How.do.you.currently.describe.your.sexual.identity.Please.select.the.option.that.best.fits.how.you.identify..You.may.skip.this.question.if.you.prefer.not.to.answer. Unsure",
-    "How.do.you.currently.describe.your.sexual.identity.Please.select.the.option.that.best.fits.how.you.identify..You.may.skip.this.question.if.you.prefer.not.to.answer. Prefer not to answer",
-    "How.do.you.currently.describe.your.sexual.identity.Please.select.the.option.that.best.fits.how.you.identify..You.may.skip.this.question.if.you.prefer.not.to.answer. If you wish to self-describe please do so here"
+cat("\nNormalized data saved to: normalized_survey_responses.csv\n")
+
+# Save as RDS
+saveRDS(
+  normalized_data,
+  "Output/normalized_survey_responses.rds"
 )
 
+cat("Also saved as RDS file: normalized_survey_responses.rds\n")
 
-# ------------------------------------------------------------------------------
-## 🚀 Step 2: Execute Brute-Force Consolidation
-# ------------------------------------------------------------------------------
+# Save the mapping for reference
+write_csv(
+  column_mapping,
+  "Output/question_answer_mapping.csv"
+)
 
-mod3_combined_brute <- mod3_working %>%
-    rowwise() %>%
-    
-    # 1. Race Consolidation
-    mutate(
-        race_combined_brute = {
-            # Select the values from the current row
-            current_values <- c_across(all_of(race_cols))
-            
-            # --- BRUTE-FORCE CHECK: TRUE if the cell value is NOT NA ---
-            is_selected <- !is.na(current_values)
-            
-            # Get column names where a value exists
-            selected_choices <- race_cols[which(is_selected)]
-            
-            # Clean and combine (The cleaning step is necessary for readable output)
-            if(length(selected_choices) == 0) {
-                "" 
-            } else {
-                # Clean up the long column name text
-                cleaned_choices <- str_remove(selected_choices, fixed("How.do.you.identify...select.all.that.apply.or.self.identify."))
-                cleaned_choices <- str_trim(cleaned_choices, side = "left")
-                paste(cleaned_choices, collapse = "; ")
-            }
-        },
-        
-        # 2. Sexual Identity Consolidation
-        sexual_identity_combined_brute = {
-            # Select the values from the current row
-            current_values <- c_across(all_of(sex_id_cols))
-            
-            # --- BRUTE-FORCE CHECK: TRUE if the cell value is NOT NA ---
-            is_selected <- !is.na(current_values)
-            
-            # Get column names where a value exists
-            selected_choices <- sex_id_cols[which(is_selected)]
-            
-            # Clean and combine
-            if(length(selected_choices) == 0) {
-                "" 
-            } else {
-                # Clean up the long column name text
-                cleaned_choices <- str_remove(selected_choices, fixed("How.do.you.currently.describe.your.sexual.identity.Please.select.the.option.that.best.fits.how.you.identify..You.may.skip.this.question.if.you.prefer.not.to.answer."))
-                cleaned_choices <- str_trim(cleaned_choices, side = "left")
-                paste(cleaned_choices, collapse = "; ")
-            }
-        }
-    ) %>%
-    ungroup() # Do NOT remove original columns here, so you can inspect them.
+cat("Question-answer mapping saved to: question_answer_mapping.csv\n")
 
+# ============================================================================
+# STEP 7: Summary and preview
+# ============================================================================
 
-# ------------------------------------------------------------------------------
-## ✅ Verification and Debugging Step
-# ------------------------------------------------------------------------------
-cat("\n--- Sample of Consolidated Race Data (Checking for Content) ---\n")
-mod3_combined_brute$race_combined_brute %>% head(10) %>% print()
+cat("\n=== SUMMARY ===\n")
+cat("Total responses:", nrow(normalized_data), "\n")
+cat("Total questions:", ncol(normalized_data), "\n")
 
-cat("\n--- Sample of Consolidated Sexual Identity Data (Checking for Content) ---\n")
-mod3_combined_brute$sexual_identity_combined_brute %>% head(10) %>% print()
+cat("\n=== SAMPLE QUESTIONS ===\n")
+sample_qs <- head(colnames(normalized_data), 10)
+for (i in seq_along(sample_qs)) {
+  cat(i, ":", sample_qs[i], "\n")
+}
 
+cat("\n=== DATA PREVIEW (First 5 rows, first 3 columns) ===\n")
+print(normalized_data[1:5, 1:3])
 
+# Count response rates
+cat("\n=== RESPONSE RATES ===\n")
+response_counts <- normalized_data %>%
+  summarise(across(everything(), ~ sum(!is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "Question", values_to = "Responses") %>%
+  arrange(desc(Responses)) %>%
+  head(10)
+
+print(response_counts)
+
+cat("\n✓ Script completed successfully!\n")
+cat("✓ Each question is now in a single column\n")
+cat("✓ Multiple selections are separated by semicolons (;)\n")
 ```
+
+
+
+
 
 
 

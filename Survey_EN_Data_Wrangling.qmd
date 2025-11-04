@@ -258,10 +258,6 @@ cat("✓ Multiple selections are separated by semicolons (;)\n")
 
 
 ```{r}
-# Install and load required packages
-install.packages(c("ggplot2", "dplyr", "tidyr", "scales", "gridExtra", "RColorBrewer"), 
-                 repos='http://cran.rstudio.com/')
-
 library(ggplot2)
 library(dplyr)
 library(tidyr)
@@ -270,10 +266,30 @@ library(gridExtra)
 library(RColorBrewer)
 
 # Read the data
-data <- read.csv("normalized_survey_responses (1).csv", 
+data <- read.csv("Output/normalized_survey_responses.csv", 
                  stringsAsFactors = FALSE, check.names = FALSE)
 
-# Create clean column names
+columns_to_remove <- c("Respondent ID", "Respondent.ID", 
+                       "Collector ID", "Collector.ID",
+                       "Start Date", "Start.Date",
+                       "End Date", "End.Date",
+                       "IP Address", "IP.Address",
+                       "Email Address", "Email.Address",
+                       "First Name", "First.Name",
+                       "Last Name", "Last.Name",
+                       "Custom Data 1", "Custom.Data.1")
+
+# Remove columns that match any of these names
+data <- data %>%
+  select(-any_of(columns_to_remove))
+
+cat("After removing identifying columns:", ncol(data), "\n")
+cat("Remaining columns:\n")
+print(names(data))
+
+
+
+# Create a more complete list of clean names for 46 columns
 clean_names <- c(
   "tax_method", "site_location", "overall_experience", "enough_info",
   "future_scheduling", "financial_coaching_discussed", "felt_respected",
@@ -287,7 +303,18 @@ clean_names <- c(
   "ctc_info_needed", "no_enroll_reason", "ctc_use", "involvement_interest",
   "volunteer_barriers"
 )
-colnames(data) <- clean_names
+
+# Pad with generic names for any extra columns
+if(ncol(data) > length(clean_names)) {
+  extra_names <- paste0("extra_col_", 1:(ncol(data) - length(clean_names)))
+  clean_names <- c(clean_names, extra_names)
+}
+
+# Assign column names
+colnames(data) <- clean_names[1:ncol(data)]
+
+cat("\nNew column names assigned:\n")
+print(names(data))
 
 #############################################
 # DATA PREPROCESSING
@@ -295,6 +322,7 @@ colnames(data) <- clean_names
 
 # Helper functions
 satisfaction_map <- function(x) {
+  if(is.na(x) || x == "") return(NA)
   if(grepl("Very positive", x, ignore.case = TRUE)) return(5)
   else if(grepl("Somewhat positive", x, ignore.case = TRUE)) return(4)
   else if(grepl("Neutral", x, ignore.case = TRUE)) return(3)
@@ -328,6 +356,7 @@ simplify_race <- function(x) {
 }
 
 respect_map <- function(x) {
+  if(is.na(x) || x == "") return(NA)
   if(grepl("Very respected", x, ignore.case = TRUE)) return(5)
   else if(grepl("Somewhat respected", x, ignore.case = TRUE)) return(4)
   else if(grepl("Neutral", x, ignore.case = TRUE)) return(3)
@@ -337,6 +366,7 @@ respect_map <- function(x) {
 }
 
 inclusion_map <- function(x) {
+  if(is.na(x) || x == "") return(NA)
   if(grepl("Very included", x, ignore.case = TRUE)) return(5)
   else if(grepl("Somewhat included", x, ignore.case = TRUE)) return(4)
   else if(grepl("Neutral", x, ignore.case = TRUE)) return(3)
@@ -345,19 +375,34 @@ inclusion_map <- function(x) {
   else return(NA)
 }
 
-# Apply transformations
-data <- data %>%
+# Check if required columns exist before processing
+required_cols <- c("overall_experience", "felt_respected", "felt_included", 
+                   "annual_income", "race_ethnicity", "age", "household_size", 
+                   "children_under_18")
+
+missing_cols <- setdiff(required_cols, names(data))
+if(length(missing_cols) > 0) {
+  cat("\nWarning: Missing columns:", paste(missing_cols, collapse = ", "), "\n")
+  cat("Available columns:", paste(names(data), collapse = ", "), "\n")
+  stop("Please verify column names match the data structure.")
+}
+
+# Apply transformations with better error handling
+data_processed <- data %>%
   mutate(
     satisfaction_score = sapply(overall_experience, satisfaction_map),
     respect_score = sapply(felt_respected, respect_map),
     inclusion_score = sapply(felt_included, inclusion_map),
     income_numeric = sapply(annual_income, income_to_numeric),
     race_simple = sapply(race_ethnicity, simplify_race),
-    age_numeric = as.numeric(age),
-    household_numeric = as.numeric(household_size),
-    children_numeric = as.numeric(children_under_18),
-    
-    # Create categorical variables
+    age_numeric = as.numeric(as.character(age)),
+    household_numeric = as.numeric(as.character(household_size)),
+    children_numeric = as.numeric(as.character(children_under_18))
+  )
+
+# Create categorical variables separately
+data_processed <- data_processed %>%
+  mutate(
     age_group = cut(age_numeric, 
                     breaks = c(0, 30, 40, 50, 60, 70, 100),
                     labels = c("18-30", "31-40", "41-50", "51-60", "61-70", "70+")),
@@ -371,8 +416,9 @@ data <- data %>%
       TRUE ~ NA_character_
     ),
     
-    income_binary = ifelse(income_numeric < 20000, "Low Income (<$20k)", 
-                           "Higher Income ($20k+)"),
+    income_binary = ifelse(!is.na(income_numeric) & income_numeric < 20000, 
+                          "Low Income (<$20k)", 
+                          ifelse(!is.na(income_numeric), "Higher Income ($20k+)", NA_character_)),
     
     gender_clean = case_when(
       gender == "Female" ~ "Female",
@@ -381,7 +427,9 @@ data <- data %>%
       TRUE ~ "Other/NA"
     ),
     
-    has_children = ifelse(children_numeric > 0, "Has Children", "No Children"),
+    has_children = ifelse(!is.na(children_numeric) & children_numeric > 0, 
+                         "Has Children", 
+                         ifelse(!is.na(children_numeric), "No Children", NA_character_)),
     
     employment_simple = case_when(
       grepl("full-time", employment_status, ignore.case = TRUE) ~ "Full-time",
@@ -392,19 +440,24 @@ data <- data %>%
       TRUE ~ "Other/NA"
     )
   ) %>%
-  # Order income bracket as factor
   mutate(income_bracket = factor(income_bracket, 
                                  levels = c("Low (<$10k)", "Low-Mid ($10-20k)", 
                                            "Middle ($20-30k)", "Mid-High ($30-40k)", 
                                            "High ($40k+)")))
 
-# Filter for main analyses (remove NA in key variables)
+# Replace data with processed version
+data <- data_processed
+
+# Filter for main analyses
 data_main <- data %>%
   filter(!is.na(race_simple), 
          race_simple != "Other",
          gender_clean %in% c("Female", "Male"),
          !is.na(income_bracket))
 
+cat("\nData preprocessing complete!\n")
+cat("Total rows:", nrow(data), "\n")
+cat("Rows for main analysis:", nrow(data_main), "\n")
 #############################################
 # CREATE COMPREHENSIVE VISUALIZATIONS
 #############################################

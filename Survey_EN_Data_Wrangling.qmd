@@ -3,13 +3,14 @@ title: "Survey_EN_Data_Wrangling"
 format: html
 editor: visual
 ---
+
 ```{r}
 library("janitor")
 library("dplyr")
 ```
 
-
 ## Data Cleaning
+
 ```{r}
 # ============================================================================
 # Script: Normalize SurveyMonkey Survey Responses
@@ -256,8 +257,702 @@ cat("✓ Multiple selections are separated by semicolons (;)\n")
 
 
 
+```{r}
+# Install and load required packages
+install.packages(c("ggplot2", "dplyr", "tidyr", "scales", "gridExtra", "RColorBrewer"), 
+                 repos='http://cran.rstudio.com/')
 
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(scales)
+library(gridExtra)
+library(RColorBrewer)
 
+# Read the data
+data <- read.csv("normalized_survey_responses (1).csv", 
+                 stringsAsFactors = FALSE, check.names = FALSE)
 
+# Create clean column names
+clean_names <- c(
+  "tax_method", "site_location", "overall_experience", "enough_info",
+  "future_scheduling", "financial_coaching_discussed", "felt_respected",
+  "felt_included", "appointment_comments", "appointment_experience",
+  "website_experience", "service_delivery_preference", "tax_info_source",
+  "race_ethnicity", "gender", "sexual_identity", "age",
+  "employment_status", "annual_income", "household_size", "children_under_18",
+  "language_comfortable", "future_language_services", "disability_questions",
+  "financial_challenges", "financial_goals", "advance_ctc_enrolled",
+  "ctc_lump_sum", "advance_ctc_public_benefits", "future_ctc_likelihood",
+  "ctc_info_needed", "no_enroll_reason", "ctc_use", "involvement_interest",
+  "volunteer_barriers"
+)
+colnames(data) <- clean_names
+
+#############################################
+# DATA PREPROCESSING
+#############################################
+
+# Helper functions
+satisfaction_map <- function(x) {
+  if(grepl("Very positive", x, ignore.case = TRUE)) return(5)
+  else if(grepl("Somewhat positive", x, ignore.case = TRUE)) return(4)
+  else if(grepl("Neutral", x, ignore.case = TRUE)) return(3)
+  else if(grepl("Somewhat negative", x, ignore.case = TRUE)) return(2)
+  else if(grepl("Very negative", x, ignore.case = TRUE)) return(1)
+  else return(NA)
+}
+
+income_to_numeric <- function(x) {
+  if(is.na(x) || x == "" || x == "I prefer not to answer") return(NA)
+  else if(x == "$0") return(0)
+  else if(x == "$1-$4,999") return(2500)
+  else if(x == "$5,000-$9,999") return(7500)
+  else if(x == "$10,000-$19,999") return(15000)
+  else if(x == "$20,000-$29,999") return(25000)
+  else if(x == "$30,000-$39,999") return(35000)
+  else if(x == "$40,000-$59,999") return(50000)
+  else if(x == "$60,000+") return(70000)
+  else return(NA)
+}
+
+simplify_race <- function(x) {
+  if(is.na(x) || x == "") return(NA)
+  else if(grepl("White or European Descent", x) & !grepl(";", x)) return("White")
+  else if(grepl("Black or African American", x) & !grepl(";", x)) return("Black")
+  else if(grepl("Asian or Asian American", x) & !grepl(";", x)) return("Asian")
+  else if(grepl("Hispanic or Latino", x) & !grepl(";", x)) return("Hispanic/Latino")
+  else if(grepl("American Indian or Alaska Native", x) & !grepl(";", x)) return("Native American")
+  else if(grepl(";", x)) return("Multiracial")
+  else return("Other")
+}
+
+respect_map <- function(x) {
+  if(grepl("Very respected", x, ignore.case = TRUE)) return(5)
+  else if(grepl("Somewhat respected", x, ignore.case = TRUE)) return(4)
+  else if(grepl("Neutral", x, ignore.case = TRUE)) return(3)
+  else if(grepl("Somewhat disrespected", x, ignore.case = TRUE)) return(2)
+  else if(grepl("Very disrespected", x, ignore.case = TRUE)) return(1)
+  else return(NA)
+}
+
+inclusion_map <- function(x) {
+  if(grepl("Very included", x, ignore.case = TRUE)) return(5)
+  else if(grepl("Somewhat included", x, ignore.case = TRUE)) return(4)
+  else if(grepl("Neutral", x, ignore.case = TRUE)) return(3)
+  else if(grepl("Somewhat excluded", x, ignore.case = TRUE)) return(2)
+  else if(grepl("Very excluded", x, ignore.case = TRUE)) return(1)
+  else return(NA)
+}
+
+# Apply transformations
+data <- data %>%
+  mutate(
+    satisfaction_score = sapply(overall_experience, satisfaction_map),
+    respect_score = sapply(felt_respected, respect_map),
+    inclusion_score = sapply(felt_included, inclusion_map),
+    income_numeric = sapply(annual_income, income_to_numeric),
+    race_simple = sapply(race_ethnicity, simplify_race),
+    age_numeric = as.numeric(age),
+    household_numeric = as.numeric(household_size),
+    children_numeric = as.numeric(children_under_18),
+    
+    # Create categorical variables
+    age_group = cut(age_numeric, 
+                    breaks = c(0, 30, 40, 50, 60, 70, 100),
+                    labels = c("18-30", "31-40", "41-50", "51-60", "61-70", "70+")),
+    
+    income_bracket = case_when(
+      income_numeric < 10000 ~ "Low (<$10k)",
+      income_numeric >= 10000 & income_numeric < 20000 ~ "Low-Mid ($10-20k)",
+      income_numeric >= 20000 & income_numeric < 30000 ~ "Middle ($20-30k)",
+      income_numeric >= 30000 & income_numeric < 40000 ~ "Mid-High ($30-40k)",
+      income_numeric >= 40000 ~ "High ($40k+)",
+      TRUE ~ NA_character_
+    ),
+    
+    income_binary = ifelse(income_numeric < 20000, "Low Income (<$20k)", 
+                           "Higher Income ($20k+)"),
+    
+    gender_clean = case_when(
+      gender == "Female" ~ "Female",
+      gender == "Male" ~ "Male",
+      gender == "Non-binary" ~ "Non-binary",
+      TRUE ~ "Other/NA"
+    ),
+    
+    has_children = ifelse(children_numeric > 0, "Has Children", "No Children"),
+    
+    employment_simple = case_when(
+      grepl("full-time", employment_status, ignore.case = TRUE) ~ "Full-time",
+      grepl("part-time", employment_status, ignore.case = TRUE) ~ "Part-time",
+      grepl("self-employed", employment_status, ignore.case = TRUE) ~ "Self-employed",
+      grepl("Unemployed, looking", employment_status) ~ "Unemployed (seeking)",
+      grepl("Unemployed, not looking", employment_status) ~ "Unemployed (not seeking)",
+      TRUE ~ "Other/NA"
+    )
+  ) %>%
+  # Order income bracket as factor
+  mutate(income_bracket = factor(income_bracket, 
+                                 levels = c("Low (<$10k)", "Low-Mid ($10-20k)", 
+                                           "Middle ($20-30k)", "Mid-High ($30-40k)", 
+                                           "High ($40k+)")))
+
+# Filter for main analyses (remove NA in key variables)
+data_main <- data %>%
+  filter(!is.na(race_simple), 
+         race_simple != "Other",
+         gender_clean %in% c("Female", "Male"),
+         !is.na(income_bracket))
+
+#############################################
+# CREATE COMPREHENSIVE VISUALIZATIONS
+#############################################
+
+# Set theme
+theme_set(theme_minimal(base_size = 12) +
+          theme(plot.title = element_text(face = "bold", size = 16),
+                axis.text.x = element_text(angle = 45, hjust = 1),
+                legend.position = "right",
+                panel.grid.minor = element_blank()))
+
+# Color palettes
+race_colors <- brewer.pal(8, "Set2")
+gender_colors <- c("Female" = "#E91E63", "Male" = "#2196F3", "Non-binary" = "#9C27B0")
+income_colors <- brewer.pal(5, "RdYlGn")[5:1]
+
+pdf("comprehensive_granular_analysis.pdf", width = 16, height = 10)
+
+#############################################
+# 1. SATISFACTION BY GENDER, RACE, AND INCOME
+#############################################
+cat("Creating Plot 1: Satisfaction by Demographics...\n")
+
+p1 <- data_main %>%
+  group_by(race_simple, gender_clean, income_bracket) %>%
+  summarise(
+    mean_satisfaction = mean(satisfaction_score, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  filter(n >= 5) %>%  # Only show groups with 5+ respondents
+  ggplot(aes(x = race_simple, y = mean_satisfaction, fill = income_bracket)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~gender_clean, ncol = 2) +
+  scale_fill_manual(values = income_colors) +
+  labs(title = "Satisfaction Score by Race, Gender, and Income Level",
+       subtitle = "Mean satisfaction scores (1-5 scale) - Groups with 5+ respondents",
+       x = "Race/Ethnicity",
+       y = "Mean Satisfaction Score",
+       fill = "Income Bracket") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_hline(yintercept = 4.5, linetype = "dashed", color = "red", alpha = 0.5) +
+  ylim(0, 5)
+
+print(p1)
+
+#############################################
+# 2. INCOME DISTRIBUTION BY RACE AND GENDER
+#############################################
+cat("Creating Plot 2: Income Distribution...\n")
+
+p2 <- data_main %>%
+  ggplot(aes(x = race_simple, y = income_numeric, fill = gender_clean)) +
+  geom_boxplot(alpha = 0.7) +
+  scale_fill_manual(values = gender_colors) +
+  scale_y_continuous(labels = dollar_format()) +
+  labs(title = "Income Distribution by Race and Gender",
+       subtitle = "Box plots showing median, quartiles, and outliers",
+       x = "Race/Ethnicity",
+       y = "Annual Income",
+       fill = "Gender") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  coord_flip()
+
+print(p2)
+
+#############################################
+# 3. AGE DISTRIBUTION BY GENDER, RACE, AND INCOME
+#############################################
+cat("Creating Plot 3: Age Distribution by Demographics...\n")
+
+p3 <- data_main %>%
+  ggplot(aes(x = age_numeric, fill = income_bracket)) +
+  geom_histogram(bins = 20, alpha = 0.7, position = "identity") +
+  facet_grid(gender_clean ~ race_simple) +
+  scale_fill_manual(values = income_colors) +
+  labs(title = "Age Distribution by Gender, Race, and Income",
+       subtitle = "Histogram showing age patterns across demographic groups",
+       x = "Age (years)",
+       y = "Count",
+       fill = "Income Bracket") +
+  theme(strip.text = element_text(size = 9))
+
+print(p3)
+
+#############################################
+# 4. RESPECT AND INCLUSION BY DEMOGRAPHICS
+#############################################
+cat("Creating Plot 4: Respect and Inclusion Scores...\n")
+
+respect_inclusion_data <- data_main %>%
+  group_by(race_simple, gender_clean, income_binary) %>%
+  summarise(
+    mean_respect = mean(respect_score, na.rm = TRUE),
+    mean_inclusion = mean(inclusion_score, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  filter(n >= 5)
+
+p4 <- respect_inclusion_data %>%
+  pivot_longer(cols = c(mean_respect, mean_inclusion),
+               names_to = "metric",
+               values_to = "score") %>%
+  mutate(metric = recode(metric, 
+                        mean_respect = "Respect",
+                        mean_inclusion = "Inclusion")) %>%
+  ggplot(aes(x = race_simple, y = score, fill = metric)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(income_binary ~ gender_clean) +
+  scale_fill_brewer(palette = "Set1") +
+  labs(title = "Respect and Inclusion Scores by Race, Gender, and Income",
+       subtitle = "Mean scores (1-5 scale) for feeling respected and included",
+       x = "Race/Ethnicity",
+       y = "Mean Score",
+       fill = "Metric") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8)) +
+  ylim(0, 5)
+
+print(p4)
+
+#############################################
+# 5. FINANCIAL CHALLENGES BY DEMOGRAPHICS
+#############################################
+cat("Creating Plot 5: Financial Challenges...\n")
+
+# Parse financial challenges
+challenges_parsed <- data_main %>%
+  select(race_simple, gender_clean, income_bracket, financial_challenges) %>%
+  filter(!is.na(financial_challenges), financial_challenges != "") %>%
+  mutate(challenges_list = strsplit(as.character(financial_challenges), ";")) %>%
+  unnest(challenges_list) %>%
+  mutate(challenges_list = trimws(challenges_list)) %>%
+  filter(challenges_list != "", 
+         challenges_list != "NA",
+         challenges_list != "None of the above",
+         challenges_list != "Prefer not to answer")
+
+# Get top 5 challenges
+top_challenges <- challenges_parsed %>%
+  count(challenges_list, sort = TRUE) %>%
+  head(5) %>%
+  pull(challenges_list)
+
+p5 <- challenges_parsed %>%
+  filter(challenges_list %in% top_challenges) %>%
+  count(race_simple, gender_clean, income_bracket, challenges_list) %>%
+  group_by(race_simple, gender_clean, income_bracket) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ggplot(aes(x = race_simple, y = pct, fill = challenges_list)) +
+  geom_bar(stat = "identity", position = "stack") +
+  facet_grid(income_bracket ~ gender_clean) +
+  scale_fill_brewer(palette = "Set3") +
+  labs(title = "Top 5 Financial Challenges by Demographics",
+       subtitle = "Percentage distribution within each demographic group",
+       x = "Race/Ethnicity",
+       y = "Percentage (%)",
+       fill = "Challenge Type") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        legend.text = element_text(size = 8),
+        strip.text = element_text(size = 8))
+
+print(p5)
+
+#############################################
+# 6. EMPLOYMENT STATUS BY DEMOGRAPHICS
+#############################################
+cat("Creating Plot 6: Employment Patterns...\n")
+
+p6 <- data_main %>%
+  filter(!is.na(employment_simple), employment_simple != "Other/NA") %>%
+  count(race_simple, gender_clean, income_bracket, employment_simple) %>%
+  group_by(race_simple, gender_clean, income_bracket) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ggplot(aes(x = income_bracket, y = pct, fill = employment_simple)) +
+  geom_bar(stat = "identity", position = "fill") +
+  facet_grid(race_simple ~ gender_clean) +
+  scale_fill_brewer(palette = "Spectral") +
+  scale_y_continuous(labels = percent_format()) +
+  labs(title = "Employment Status by Race, Gender, and Income",
+       subtitle = "Proportion of employment types within each group",
+       x = "Income Bracket",
+       y = "Proportion",
+       fill = "Employment Status") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+        strip.text.y = element_text(size = 8))
+
+print(p6)
+
+#############################################
+# 7. HOUSEHOLD SIZE AND CHILDREN BY DEMOGRAPHICS
+#############################################
+cat("Creating Plot 7: Household Composition...\n")
+
+p7 <- data_main %>%
+  filter(!is.na(household_numeric), household_numeric <= 10) %>%
+  ggplot(aes(x = household_numeric, fill = has_children)) +
+  geom_bar(position = "dodge") +
+  facet_grid(income_binary ~ race_simple + gender_clean) +
+  scale_fill_manual(values = c("Has Children" = "#4CAF50", 
+                               "No Children" = "#9E9E9E")) +
+  labs(title = "Household Size Distribution by Demographics and Parental Status",
+       subtitle = "Number of people in household across demographic groups",
+       x = "Household Size",
+       y = "Count",
+       fill = "Parental Status") +
+  theme(strip.text = element_text(size = 7))
+
+print(p7)
+
+#############################################
+# 8. AGE VS INCOME BY RACE AND GENDER
+#############################################
+cat("Creating Plot 8: Age-Income Relationship...\n")
+
+p8 <- data_main %>%
+  filter(!is.na(age_numeric), !is.na(income_numeric)) %>%
+  ggplot(aes(x = age_numeric, y = income_numeric, color = gender_clean)) +
+  geom_point(alpha = 0.5, size = 2) +
+  geom_smooth(method = "loess", se = TRUE, linewidth = 1.5) +
+  facet_wrap(~race_simple, ncol = 3) +
+  scale_color_manual(values = gender_colors) +
+  scale_y_continuous(labels = dollar_format()) +
+  labs(title = "Age vs Income Relationship by Race and Gender",
+       subtitle = "Scatter plot with LOESS smoothing curves",
+       x = "Age (years)",
+       y = "Annual Income",
+       color = "Gender") +
+  theme(strip.text = element_text(size = 10))
+
+print(p8)
+
+#############################################
+# 9. SATISFACTION TRENDS ACROSS AGE GROUPS
+#############################################
+cat("Creating Plot 9: Satisfaction by Age Groups...\n")
+
+p9 <- data_main %>%
+  filter(!is.na(age_group), !is.na(satisfaction_score)) %>%
+  ggplot(aes(x = age_group, y = satisfaction_score, fill = income_bracket)) +
+  geom_boxplot(alpha = 0.7) +
+  facet_grid(gender_clean ~ race_simple) +
+  scale_fill_manual(values = income_colors) +
+  labs(title = "Satisfaction Distribution Across Age Groups by Demographics",
+       subtitle = "Box plots showing satisfaction variation by age, race, gender, and income",
+       x = "Age Group",
+       y = "Satisfaction Score",
+       fill = "Income Bracket") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+        strip.text = element_text(size = 8))
+
+print(p9)
+
+#############################################
+# 10. FINANCIAL GOALS BY DEMOGRAPHICS
+#############################################
+cat("Creating Plot 10: Financial Goals...\n")
+
+goals_parsed <- data_main %>%
+  select(race_simple, gender_clean, income_bracket, financial_goals) %>%
+  filter(!is.na(financial_goals), financial_goals != "") %>%
+  mutate(goals_list = strsplit(as.character(financial_goals), ";")) %>%
+  unnest(goals_list) %>%
+  mutate(goals_list = trimws(goals_list)) %>%
+  filter(goals_list != "", 
+         goals_list != "NA",
+         goals_list != "Prefer not to answer")
+
+# Get top 5 goals
+top_goals <- goals_parsed %>%
+  count(goals_list, sort = TRUE) %>%
+  head(5) %>%
+  pull(goals_list)
+
+p10 <- goals_parsed %>%
+  filter(goals_list %in% top_goals) %>%
+  count(race_simple, income_bracket, goals_list) %>%
+  group_by(race_simple, income_bracket) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ggplot(aes(x = income_bracket, y = pct, fill = goals_list)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~race_simple, ncol = 2) +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(title = "Top 5 Financial Goals by Race and Income Level",
+       subtitle = "Percentage of respondents with each goal",
+       x = "Income Bracket",
+       y = "Percentage (%)",
+       fill = "Financial Goal") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+        legend.text = element_text(size = 8))
+
+print(p10)
+
+#############################################
+# 11. HEATMAP: SATISFACTION BY RACE AND INCOME
+#############################################
+cat("Creating Plot 11: Satisfaction Heatmap...\n")
+
+heatmap_data <- data_main %>%
+  group_by(race_simple, income_bracket, gender_clean) %>%
+  summarise(
+    mean_satisfaction = mean(satisfaction_score, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  filter(n >= 3)
+
+p11 <- ggplot(heatmap_data, 
+              aes(x = income_bracket, y = race_simple, fill = mean_satisfaction)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(aes(label = round(mean_satisfaction, 2)), 
+            color = "black", size = 3) +
+  facet_wrap(~gender_clean) +
+  scale_fill_gradient2(low = "#E74C3C", mid = "#F39C12", high = "#2ECC71",
+                      midpoint = 4.5, limits = c(4, 5)) +
+  labs(title = "Satisfaction Score Heatmap by Race, Income, and Gender",
+       subtitle = "Numbers show mean satisfaction score (1-5 scale)",
+       x = "Income Bracket",
+       y = "Race/Ethnicity",
+       fill = "Mean\nSatisfaction") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+print(p11)
+
+#############################################
+# 12. COMPLEX INTERACTION: SATISFACTION BY MULTIPLE FACTORS
+#############################################
+cat("Creating Plot 12: Complex Satisfaction Analysis...\n")
+
+p12 <- data_main %>%
+  filter(!is.na(satisfaction_score), !is.na(has_children)) %>%
+  group_by(race_simple, gender_clean, income_bracket, has_children) %>%
+  summarise(
+    mean_satisfaction = mean(satisfaction_score, na.rm = TRUE),
+    se = sd(satisfaction_score, na.rm = TRUE) / sqrt(n()),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  filter(n >= 5) %>%
+  ggplot(aes(x = income_bracket, y = mean_satisfaction, 
+             color = has_children, group = has_children)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = mean_satisfaction - se, 
+                    ymax = mean_satisfaction + se),
+                width = 0.2) +
+  facet_grid(gender_clean ~ race_simple) +
+  scale_color_manual(values = c("Has Children" = "#E91E63", 
+                               "No Children" = "#2196F3")) +
+  labs(title = "Satisfaction by Income, Race, Gender, and Parental Status",
+       subtitle = "Mean satisfaction with standard error bars (groups with 5+ respondents)",
+       x = "Income Bracket",
+       y = "Mean Satisfaction Score",
+       color = "Parental Status") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+        strip.text = element_text(size = 8)) +
+  ylim(4, 5)
+
+print(p12)
+
+#############################################
+# 13. INCOME INEQUALITY VISUALIZATION
+#############################################
+cat("Creating Plot 13: Income Inequality Analysis...\n")
+
+income_stats <- data_main %>%
+  group_by(race_simple, gender_clean) %>%
+  summarise(
+    median_income = median(income_numeric, na.rm = TRUE),
+    q25 = quantile(income_numeric, 0.25, na.rm = TRUE),
+    q75 = quantile(income_numeric, 0.75, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  )
+
+p13 <- ggplot(income_stats, 
+              aes(x = race_simple, y = median_income, fill = gender_clean)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7) +
+  geom_errorbar(aes(ymin = q25, ymax = q75),
+                position = position_dodge(0.9), width = 0.2) +
+  scale_fill_manual(values = gender_colors) +
+  scale_y_continuous(labels = dollar_format()) +
+  labs(title = "Median Income by Race and Gender with Interquartile Range",
+       subtitle = "Error bars show 25th to 75th percentile range",
+       x = "Race/Ethnicity",
+       y = "Median Annual Income",
+       fill = "Gender") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  coord_flip()
+
+print(p13)
+
+#############################################
+# 14. RESPECT-INCLUSION CORRELATION BY DEMOGRAPHICS
+#############################################
+cat("Creating Plot 14: Respect-Inclusion Correlation...\n")
+
+p14 <- data_main %>%
+  filter(!is.na(respect_score), !is.na(inclusion_score)) %>%
+  ggplot(aes(x = respect_score, y = inclusion_score, color = income_bracket)) +
+  geom_point(alpha = 0.5, size = 2) +
+  geom_smooth(method = "lm", se = TRUE, linewidth = 1) +
+  facet_grid(gender_clean ~ race_simple) +
+  scale_color_manual(values = income_colors) +
+  labs(title = "Respect vs Inclusion Scores by Race, Gender, and Income",
+       subtitle = "Scatter plot with linear regression lines",
+       x = "Respect Score",
+       y = "Inclusion Score",
+       color = "Income Bracket") +
+  theme(strip.text = element_text(size = 9))
+
+print(p14)
+
+#############################################
+# 15. SERVICE USAGE PATTERNS BY DEMOGRAPHICS
+#############################################
+cat("Creating Plot 15: Service Site Usage...\n")
+
+site_data <- data %>%
+  filter(!is.na(site_location), site_location != "",
+         !is.na(race_simple), race_simple != "Other",
+         gender_clean %in% c("Female", "Male"),
+         !is.na(income_binary)) %>%
+  mutate(site_simple = case_when(
+    grepl("Main Office, St. Paul", site_location) ~ "Main Office",
+    grepl("VEAP, Bloomington", site_location) ~ "VEAP",
+    grepl("CAPI, Brooklyn", site_location) ~ "CAPI",
+    grepl("Merrick", site_location) ~ "Merrick",
+    TRUE ~ "Other"
+  ))
+
+p15 <- site_data %>%
+  count(race_simple, gender_clean, income_binary, site_simple) %>%
+  group_by(race_simple, gender_clean, income_binary) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ggplot(aes(x = site_simple, y = pct, fill = income_binary)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(gender_clean ~ race_simple) +
+  scale_fill_manual(values = c("Low Income (<$20k)" = "#E74C3C",
+                               "Higher Income ($20k+)" = "#2ECC71")) +
+  labs(title = "Service Site Usage by Race, Gender, and Income",
+       subtitle = "Percentage using each site within demographic groups",
+       x = "Service Site",
+       y = "Percentage (%)",
+       fill = "Income Level") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+        strip.text = element_text(size = 8))
+
+print(p15)
+
+#############################################
+# 16. AGE GROUP DISTRIBUTION BY ALL DEMOGRAPHICS
+#############################################
+cat("Creating Plot 16: Age Group Proportions...\n")
+
+p16 <- data_main %>%
+  filter(!is.na(age_group)) %>%
+  count(race_simple, gender_clean, income_bracket, age_group) %>%
+  group_by(race_simple, gender_clean, income_bracket) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ggplot(aes(x = age_group, y = pct, fill = age_group)) +
+  geom_bar(stat = "identity") +
+  facet_grid(income_bracket ~ race_simple + gender_clean) +
+  scale_fill_brewer(palette = "YlOrRd") +
+  labs(title = "Age Group Distribution by Race, Gender, and Income",
+       subtitle = "Percentage distribution within each demographic combination",
+       x = "Age Group",
+       y = "Percentage (%)",
+       fill = "Age Group") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 6),
+        strip.text = element_text(size = 6),
+        legend.position = "bottom")
+
+print(p16)
+
+#############################################
+# 17. MULTIDIMENSIONAL SATISFACTION ANALYSIS
+#############################################
+cat("Creating Plot 17: Multidimensional Satisfaction...\n")
+
+multi_satisfaction <- data_main %>%
+  filter(!is.na(satisfaction_score), !is.na(age_group)) %>%
+  group_by(race_simple, gender_clean, income_bracket, age_group) %>%
+  summarise(
+    mean_satisfaction = mean(satisfaction_score, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  filter(n >= 3)
+
+p17 <- ggplot(multi_satisfaction, 
+              aes(x = age_group, y = mean_satisfaction, 
+                  color = income_bracket, group = income_bracket)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  facet_grid(gender_clean ~ race_simple) +
+  scale_color_manual(values = income_colors) +
+  labs(title = "Satisfaction Trends Across Age by Race, Gender, and Income",
+       subtitle = "Mean satisfaction scores showing age patterns (groups with 3+ respondents)",
+       x = "Age Group",
+       y = "Mean Satisfaction Score",
+       color = "Income Bracket") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+        strip.text = element_text(size = 8)) +
+  ylim(4, 5)
+
+print(p17)
+
+#############################################
+# 18. INCOME DISPARITY ANALYSIS
+#############################################
+cat("Creating Plot 18: Income Disparity Visualization...\n")
+
+p18 <- data_main %>%
+  ggplot(aes(x = race_simple, y = income_numeric, fill = gender_clean)) +
+  geom_violin(alpha = 0.6, scale = "width") +
+  geom_boxplot(width = 0.2, position = position_dodge(0.9), 
+               outlier.shape = NA, alpha = 0.8) +
+  scale_fill_manual(values = gender_colors) +
+  scale_y_continuous(labels = dollar_format()) +
+  labs(title = "Income Distribution Patterns by Race and Gender",
+       subtitle = "Violin plots show distribution density; box plots show quartiles",
+       x = "Race/Ethnicity",
+       y = "Annual Income",
+       fill = "Gender") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  coord_flip()
+
+print(p18)
+
+dev.off()
+
+cat("\n==========================================================\n")
+cat("VISUALIZATION COMPLETE!\n")
+cat("==========================================================\n")
+cat("Output file: comprehensive_granular_analysis.pdf\n")
+cat("Total pages: 18 detailed visualizations\n")
+cat("\nKey analyses included:\n")
+cat("  - Satisfaction by race, gender, and income (multiple views)\n")
+cat("  - Income distributions and disparities\n")
+cat("  - Age-income relationships\n")
+cat("  - Respect and inclusion scores\n")
+cat("  - Financial challenges and goals\n")
+cat("  - Employment patterns\n")
+cat("  - Household composition\n")
+cat("  - Service usage patterns\n")
+cat("  - Complex multi-factor interactions\n")
+cat("==========================================================\n")
+```
 
 The `echo: false` option disables the printing of code (only output is displayed).
